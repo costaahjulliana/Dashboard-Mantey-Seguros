@@ -11,7 +11,7 @@
 </style>
 </head>
 <body><div class="app">
-<header class="header"><div class="brand"><div class="logo">M</div><div><div class="eyebrow">Gestão comercial</div><h1>Mantey Seguros</h1><div class="muted mini">Seguros novos • Renovação • Ramos Elementares</div></div></div><div class="actions"><button class="secondary" id="exportBtn">Exportar dados CSV</button><button class="primary" id="newSaleTop">+ Lançar venda</button></div></header>
+<header class="header"><div class="brand"><div class="logo">M</div><div><div class="eyebrow">Gestão comercial</div><h1>Mantey Seguros</h1><div class="muted mini">Seguros novos • Renovação • Ramos Elementares</div></div></div><div class="actions"><button class="secondary" id="exportBtn">Exportar dados CSV</button><button class="secondary" id="backupBtn">Baixar backup</button><button class="secondary" id="importBtn">Restaurar backup</button><input id="backupFile" type="file" accept=".json,application/json" hidden><button class="primary" id="newSaleTop">+ Lançar venda</button></div></header>
 <nav class="nav" id="nav">
 <button class="active" data-tab="overview">Seguros novos</button><button data-tab="renewals">Renovação</button><button data-tab="re">Ramos Elementares (RE)</button>
 </nav>
@@ -204,5 +204,49 @@ window.togglePerson=id=>{let p=people.find(x=>x.id===id);if(!p)return;p.status=p
 window.deletePerson=id=>{let p=people.find(x=>x.id===id);if(!p)return;const linked=sales.filter(s=>s.seller===id).length;const msg=`Excluir definitivamente o cadastro de ${p.name}?${linked?`\n\nHá ${linked} venda(s) vinculada(s). Elas serão mantidas no histórico com o nome do vendedor, mas ele deixará de aparecer na equipe e no ranking.`:''}\n\nEssa ação não pode ser desfeita.`;if(!confirm(msg))return;sales.forEach(s=>{if(s.seller===id){s.sellerName=s.sellerName||p.name;s.deletedSeller=true}});people=people.filter(x=>x.id!==id);renderAll();alert('Cadastro do funcionário excluído. O histórico de vendas foi preservado.')};
 function csvCell(v){return '"'+String(v??'').replace(/"/g,'""')+'"'}
 $('exportBtn').onclick=()=>{let rows=[['Tipo','Data','Vendedor','Cliente','Seguradora','PL','Comissão (%)','Comissão (R$)','Pagamento','Produto','Observações'],...sales.map(s=>['Venda',s.date,people.find(p=>p.id===s.seller)?.name||s.sellerName||'',s.client,s.insurer,s.pl,s.commissionPct??'',s.commission,s.payment,s.product,s.notes]),...people.map(p=>['Vendedor','',p.name,'','','','','','','Situação: '+p.status+'; PL base: '+(p.basePL||0)]),...reSales.map(x=>['Ramos Elementares',x.date,rePeople.find(p=>p.id===x.seller)?.name||x.sellerName||'',x.client,x.insurer,x.pl,x.commissionPct??'',x.commission,x.payment,x.product,x.notes])];let csv='\ufeff'+rows.map(r=>r.map(csvCell).join(';')).join('\r\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));a.download='dashboard_seguros_'+today()+'.csv';a.click();URL.revokeObjectURL(a.href)};
+
+// Backup completo: inclui os dados dos três setores e os cadastros.
+const BACKUP_KEYS = [
+  'mantey_people','mantey_sales','mantey_goals',
+  'mantey_renewal_people','mantey_renewal_sales',
+  'mantey_re_people','mantey_re_sales',
+  'mantey_november_reset_v1'
+];
+$('backupBtn').onclick=()=>{
+  try {
+    const data={app:'Dashboard Mantey Seguros',formatVersion:1,exportedAt:new Date().toISOString(),data:{}};
+    BACKUP_KEYS.forEach(k=>{const value=localStorage.getItem(k);if(value!==null)data.data[k]=value;});
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json;charset=utf-8'});
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='backup_mantey_seguros_'+today()+'.json';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    alert('Backup baixado. Guarde esse arquivo em um local seguro.');
+  } catch(err) { alert('Não foi possível criar o backup: '+err.message); }
+};
+$('importBtn').onclick=()=> $('backupFile').click();
+$('backupFile').onchange=async e=>{
+  const file=e.target.files?.[0]; if(!file)return;
+  try {
+    const backup=JSON.parse(await file.text());
+    if(!backup || backup.app!=='Dashboard Mantey Seguros' || !backup.data || typeof backup.data!=='object')
+      throw new Error('Este arquivo não parece ser um backup válido do Dashboard Mantey Seguros.');
+    const allowed=BACKUP_KEYS.filter(k=>Object.prototype.hasOwnProperty.call(backup.data,k));
+    if(!allowed.length) throw new Error('O backup não contém dados reconhecidos.');
+    for(const k of allowed){
+      if(k==='mantey_november_reset_v1') continue;
+      const parsed=JSON.parse(backup.data[k]);
+      if(!Array.isArray(parsed)) throw new Error('Dados inválidos no campo '+k+'.');
+    }
+    const date=backup.exportedAt?new Date(backup.exportedAt).toLocaleString('pt-BR'):'data não informada';
+    if(!confirm('Restaurar este backup ('+date+')? Os dados atuais correspondentes serão substituídos. Recomendamos baixar um backup atual antes de continuar.'))return;
+    allowed.forEach(k=>localStorage.setItem(k,backup.data[k]));
+    alert('Backup restaurado. O dashboard será recarregado para atualizar os dados.');
+    location.reload();
+  } catch(err) {
+    alert('Não foi possível restaurar o backup: '+err.message);
+  } finally { e.target.value=''; }
+};
+
 $('reDate').value='2026-11-01';$('reRefDate').value='2026-11-01';$('renewalDate').value='2026-11-01';$('renewalRefDate').value='2026-11-01';$('refDate').value='2026-11-01';$('rankDate').value='2026-11-01';$('saleDate').value='2026-11-01';refreshOptions();renderAll();
 </script></body></html>
